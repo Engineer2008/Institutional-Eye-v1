@@ -1,0 +1,5 @@
+{
+  "name": "Institutional Eye V1",
+  "description": "Real-time crypto market analysis dashboard detecting institutional 'whale' activity and order book imbalances using Binance WebSocket feeds.",
+  "requestFramePermissions": []
+}
