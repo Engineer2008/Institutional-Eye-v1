@@ -36,8 +36,12 @@ export const decodeMarketStructure = (
   const safeAvg = avgVolume || 0.1;
   const threshold = safeAvg * WALL_SENSITIVITY;
   
-  const dominantSupport = cleanBids.find(b => b.vol > threshold) || null;
-  const dominantResistance = cleanAsks.find(a => a.vol > threshold) || null;
+  // Find multiple potential blocks, not just the dominant one
+  const supportBlocks = cleanBids.filter(b => b.vol > threshold).sort((a, b) => b.vol - a.vol);
+  const resistanceBlocks = cleanAsks.filter(a => a.vol > threshold).sort((a, b) => b.vol - a.vol);
+
+  const dominantSupport = supportBlocks[0] || null;
+  const dominantResistance = resistanceBlocks[0] || null;
 
   const topBid = cleanBids[0]?.price || currentPrice;
   const topAsk = cleanAsks[0]?.price || currentPrice;
@@ -45,42 +49,44 @@ export const decodeMarketStructure = (
   
   const setups: TradeSetup[] = [];
 
+  // Generate LONG setup from Support Blocks
   if (dominantSupport) {
-    const buffer = spread * 1.5;
-    const entry = dominantSupport.price + buffer;
-    const stop = dominantSupport.price - (buffer * 2);
-    const target = dominantResistance ? dominantResistance.price - buffer : currentPrice * 1.005;
+    const entry = dominantSupport.price;
+    const stop = dominantSupport.price - (spread * 5); // Exit below block
+    const t1 = currentPrice + (spread * 10);
+    const t2 = dominantResistance ? dominantResistance.price : currentPrice * 1.01;
     
-    if (entry < currentPrice * 1.05 && entry > currentPrice * 0.95) {
+    if (Math.abs(entry - currentPrice) / currentPrice < 0.02) {
       setups.push({
         direction: 'LONG',
         entryZone: entry,
         invalidation: stop,
-        target1: entry + (target - entry) * 0.5,
-        target2: target,
-        strength: Math.min(99, (dominantSupport.vol / threshold) * 60),
-        riskReward: (target - entry) / Math.abs(entry - stop),
-        reason: `Institutional Floor: ${dominantSupport.vol.toFixed(1)} BTC @ $${dominantSupport.price.toFixed(2)}`
+        target1: t1,
+        target2: t2,
+        strength: Math.min(99, (dominantSupport.vol / threshold) * 40),
+        riskReward: Math.abs(t2 - entry) / Math.abs(entry - stop),
+        reason: `Order Block Accumulation [${dominantSupport.vol.toFixed(1)} BTC]`
       });
     }
   }
 
+  // Generate SHORT setup from Resistance Blocks
   if (dominantResistance) {
-    const buffer = spread * 1.5;
-    const entry = dominantResistance.price - buffer;
-    const stop = dominantResistance.price + (buffer * 2);
-    const target = dominantSupport ? dominantSupport.price + buffer : currentPrice * 0.995;
+    const entry = dominantResistance.price;
+    const stop = dominantResistance.price + (spread * 5); // Exit above block
+    const t1 = currentPrice - (spread * 10);
+    const t2 = dominantSupport ? dominantSupport.price : currentPrice * 0.99;
 
-    if (entry < currentPrice * 1.05 && entry > currentPrice * 0.95) {
+    if (Math.abs(entry - currentPrice) / currentPrice < 0.02) {
       setups.push({
         direction: 'SHORT',
         entryZone: entry,
         invalidation: stop,
-        target1: entry - (entry - target) * 0.5,
-        target2: target,
-        strength: Math.min(99, (dominantResistance.vol / threshold) * 60),
-        riskReward: (entry - target) / Math.abs(stop - entry),
-        reason: `Institutional Ceiling: ${dominantResistance.vol.toFixed(1)} BTC @ $${dominantResistance.price.toFixed(2)}`
+        target1: t1,
+        target2: t2,
+        strength: Math.min(99, (dominantResistance.vol / threshold) * 40),
+        riskReward: Math.abs(entry - t2) / Math.abs(stop - entry),
+        reason: `Order Block Distribution [${dominantResistance.vol.toFixed(1)} BTC]`
       });
     }
   }

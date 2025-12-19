@@ -35,7 +35,6 @@ export class OrderBookBrain {
       
       if (prevQ !== undefined) {
         const delta = q - prevQ;
-        // Detect massive cancellation within approached range
         if (delta < -prevQ * this.pullThreshold) {
           pulledQty += Math.abs(delta);
           isSpoof = true;
@@ -50,6 +49,19 @@ export class OrderBookBrain {
 
     const cleanBids = bids.map(b => parseLevel(b));
     const cleanAsks = asks.map(a => parseLevel(a));
+
+    // Calculate Cumulative Totals
+    let bidTotal = 0;
+    cleanBids.forEach(b => {
+      bidTotal += b.qty;
+      b.total = bidTotal;
+    });
+
+    let askTotal = 0;
+    cleanAsks.forEach(a => {
+      askTotal += a.qty;
+      a.total = askTotal;
+    });
 
     const avgBid = cleanBids.reduce((a, b) => a + b.qty, 0) / (cleanBids.length || 1);
     const whaleThreshold = avgBid * 4.5;
@@ -68,7 +80,6 @@ export class OrderBookBrain {
     if (spoofRisk > 35) manipulationType = 'SPOOFING';
     else if (addedQty > totalPower * 0.8) manipulationType = 'LAYERING';
 
-    // Dominant Wall
     let dominantWall: BookAnalysis['dominantWall'] = null;
     const allLevels = [
       ...cleanBids.map(b => ({...b, side: 'BID' as const})), 

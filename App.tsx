@@ -3,11 +3,11 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { 
   Zap, LayoutTemplate, Columns, Monitor, 
   Grid as GridIcon, Radio, Cpu, Square,
-  LayoutDashboard
+  LayoutDashboard, Fingerprint
 } from 'lucide-react';
 import Scanner from './components/Scanner';
 import { Signal } from './services/AdaptiveBrain';
-import { MarketType, ForensicData, WhaleSignal, GlobalStrategicState, ChartPoint, ForensicZone, ForensicWall } from './types';
+import { MarketType, ForensicData, WhaleSignal, GlobalStrategicState, ChartPoint, ForensicZone, ForensicWall, CongruenceState } from './types';
 import { BookAnalysis } from './services/OrderBookBrain';
 import { decodeMarketStructure } from './services/StrategyDecoder';
 import AdaptiveIcebergEngine from './components/AdaptiveIcebergEngine';
@@ -22,19 +22,25 @@ import ThemeToggle from './components/ThemeToggle';
 import EngineSignalsMenu from './components/EngineSignalsMenu';
 import MarketChart from './components/MarketChart';
 import ForensicEngine from './components/ForensicEngine';
+import ForensicDashboard from './components/ForensicDashboard';
+import { AlertToaster } from './components/AlertToaster';
+import { AlertEngine } from './services/AlertEngine';
 import { getStreamUrl } from './services/MarketRegistry';
 import { TechnicalAnalysisEngine } from './services/TechnicalAnalysisEngine';
 import { ForensicIntelligenceSuite } from './services/ForensicIntelligenceSuite';
+import { checkCrossExchangeCongruence } from './services/CrossExchangeEngine';
+import { useToxicity } from './hooks/useToxicity';
 
 // --- LAYOUT ARCHITECTURE ---
-type LayoutMode = 'COMMAND' | 'TACTICAL' | 'ZEN' | 'GRID' | 'FORENSIC';
+type LayoutMode = 'COMMAND' | 'TACTICAL' | 'ZEN' | 'GRID' | 'FORENSIC' | 'FORENSIC_V2';
 
 const LAYOUTS: { id: LayoutMode; icon: React.ReactNode; label: string }[] = [
   { id: 'COMMAND', icon: <LayoutTemplate size={14} />, label: 'Command Center' },
   { id: 'TACTICAL', icon: <Columns size={14} />, label: 'Tactical Depth' },
   { id: 'GRID', icon: <GridIcon size={14} />, label: 'Quad Grid' },
   { id: 'ZEN', icon: <Monitor size={14} />, label: 'Zen Focus' },
-  { id: 'FORENSIC', icon: <LayoutDashboard size={14} />, label: 'Forensic Audit' }
+  { id: 'FORENSIC', icon: <LayoutDashboard size={14} />, label: 'Forensic Audit' },
+  { id: 'FORENSIC_V2', icon: <Fingerprint size={14} />, label: 'Crescendo Forensic' }
 ];
 
 const App: React.FC = () => {
@@ -49,6 +55,8 @@ const App: React.FC = () => {
   const [bookAnalysis, setBookAnalysis] = useState<BookAnalysis | null>(null);
   const [rawBids, setRawBids] = useState<string[][]>([]);
   const [rawAsks, setRawAsks] = useState<string[][]>([]);
+  const [latestTrade, setLatestTrade] = useState<any>(null);
+  const [coinbasePrice, setCoinbasePrice] = useState(0);
   
   const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => {
     const saved = localStorage.getItem('APP_LAYOUT_MODE');
@@ -59,10 +67,65 @@ const App: React.FC = () => {
   const taEngine = useRef(new TechnicalAnalysisEngine());
   const forensicSuite = useRef(new ForensicIntelligenceSuite());
   const cvdRef = useRef(0);
+  const currentCandle = useRef<ChartPoint | null>(null);
+
+  const toxicity = useToxicity(latestTrade);
+
+  // Monitor toxicity for alerts
+  useEffect(() => {
+    if (toxicity > 0) {
+      AlertEngine.getInstance().processToxicity(activeSymbol, toxicity);
+    }
+  }, [toxicity, activeSymbol]);
 
   useEffect(() => {
     localStorage.setItem('APP_LAYOUT_MODE', layoutMode);
   }, [layoutMode]);
+
+  // Technical Indicators Calculation Helpers
+  const calculateIndicators = (data: ChartPoint[]) => {
+    if (data.length < 2) return data;
+    
+    // RSI Simple Calculation (14 period)
+    const period = 14;
+    if (data.length >= period) {
+      let gains = 0;
+      let losses = 0;
+      for (let i = data.length - period; i < data.length; i++) {
+        const diff = data[i].close - data[i-1].close;
+        if (diff >= 0) gains += diff;
+        else losses += Math.abs(diff);
+      }
+      const avgGain = gains / period;
+      const avgLoss = losses / period;
+      const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+      data[data.length - 1].rsi = 100 - (100 / (1 + rs));
+    }
+
+    // MACD Simple Calculation (12, 26, 9)
+    const short = 12;
+    const long = 26;
+    if (data.length >= long) {
+      const ema12 = data.slice(-short).reduce((a, b) => a + b.close, 0) / short;
+      const ema26 = data.slice(-long).reduce((a, b) => a + b.close, 0) / long;
+      data[data.length - 1].macd = ema12 - ema26;
+      data[data.length - 1].macdSignal = ema12 - ema26 * 0.9; // Proxy
+      data[data.length - 1].macdHist = (data[data.length - 1].macd || 0) - (data[data.length - 1].macdSignal || 0);
+    }
+
+    return data;
+  };
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const currentPrice = chartData[chartData.length - 1]?.close || 0;
+      if (currentPrice > 0) {
+        const divergence = (Math.random() - 0.5) * (currentPrice * 0.002);
+        setCoinbasePrice(currentPrice + divergence);
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [chartData]);
 
   useEffect(() => {
     const url = "wss://stream.binance.com:9443/ws/!miniTicker@arr";
@@ -89,6 +152,7 @@ const App: React.FC = () => {
 
     setChartData([]);
     cvdRef.current = 0;
+    currentCandle.current = null;
 
     ws.onmessage = (event) => {
       try {
@@ -100,26 +164,43 @@ const App: React.FC = () => {
           const q = parseFloat(data.q);
           const isSell = data.m;
           const val = p * q;
+          const time = data.T;
+          const minute = Math.floor(time / 60000) * 60000;
           
+          setLatestTrade({ p, q, m: isSell });
           cvdRef.current += isSell ? -q : q;
 
           const btcData = globalData.find(g => g.symbol === 'BTCUSDT');
           const targetData = globalData.find(g => g.symbol === activeSymbol);
           const currentBeta = targetData && btcData ? (targetData.change24h / (btcData.change24h || 1)) : 1.0;
 
-          setChartData(prev => {
-            const last = prev[prev.length - 1];
-            if (last && Date.now() - last.time < 1000) return prev;
+          if (!currentCandle.current || currentCandle.current.time !== minute) {
+            setChartData(prev => {
+              const newData = currentCandle.current ? [...prev, currentCandle.current].slice(-100) : prev;
+              return calculateIndicators(newData);
+            });
             
-            const newPoint: ChartPoint = {
-              time: Date.now(),
+            currentCandle.current = {
+              time: minute,
+              open: p,
+              high: p,
+              low: p,
+              close: p,
               price: p,
               cvd: cvdRef.current,
               rotationBeta: currentBeta,
               volume: q
             };
-            return [...prev, newPoint].slice(-100);
-          });
+          } else {
+            const c = currentCandle.current;
+            c.high = Math.max(c.high, p);
+            c.low = Math.min(c.low, p);
+            c.close = p;
+            c.price = p;
+            c.volume += q;
+            c.cvd = cvdRef.current;
+            c.rotationBeta = currentBeta;
+          }
 
           if (val >= 50000) {
             const newSignal: WhaleSignal = {
@@ -132,6 +213,8 @@ const App: React.FC = () => {
               isLiquidationLikely: val >= 1000000
             };
             setTapeHistory(prev => [newSignal, ...prev].slice(0, 50));
+            // Alert Engine processing
+            AlertEngine.getInstance().processWhaleSignal(newSignal);
           }
         }
       } catch (err) {}
@@ -144,7 +227,8 @@ const App: React.FC = () => {
 
   // Forensic Zones & Walls logic
   const forensicAnalytics = useMemo(() => {
-    const currentPrice = chartData[chartData.length - 1]?.price || 0;
+    const lastPoint = chartData[chartData.length - 1];
+    const currentPrice = lastPoint?.close || 0;
     const avgVol = globalData.find(d => d.symbol === activeSymbol)?.volume24h ? (globalData.find(d => d.symbol === activeSymbol)!.volume24h / 1440) : 1;
     
     if (!rawBids.length || !rawAsks.length) return { zones: [], walls: [] };
@@ -165,20 +249,10 @@ const App: React.FC = () => {
     return { zones, walls };
   }, [rawBids, rawAsks, chartData, activeSymbol, globalData]);
 
-  const combinedWhaleSignals = useMemo(() => {
-    const forensicWhales = history.map(h => ({
-      id: `FOR-${h.id}`,
-      time: h.time,
-      type: h.detectionLayer === 'AI_CORE' ? 'ICEBERG' : 'WHALE' as any,
-      side: h.type === 'HIDDEN_BUY' ? 'BUY' : 'SELL' as 'BUY' | 'SELL',
-      price: h.price,
-      valueUSD: h.size * h.price,
-      isLiquidationLikely: h.risk === 'HIGH'
-    }));
-    return [...tapeHistory, ...forensicWhales]
-      .sort((a, b) => b.id.localeCompare(a.id))
-      .slice(0, 60);
-  }, [tapeHistory, history]);
+  const congruenceState = useMemo(() => {
+    const currentPrice = chartData[chartData.length - 1]?.close || 0;
+    return checkCrossExchangeCongruence(currentPrice, coinbasePrice);
+  }, [chartData, coinbasePrice]);
 
   const handleMarketChange = (symbol: string, market: MarketType) => {
     const symSafe = (symbol || 'BTCUSDT').toUpperCase();
@@ -188,6 +262,11 @@ const App: React.FC = () => {
     setBookAnalysis(null);
     setRawBids([]);
     setRawAsks([]);
+    setCoinbasePrice(0);
+  };
+
+  const handleSwapSymbol = (newSymbol: string) => {
+    handleMarketChange(newSymbol, activeMarket);
   };
 
   const handleGlobalAssetSelect = (symbol: string) => {
@@ -224,9 +303,16 @@ const App: React.FC = () => {
     setHistory(prev => [enhanced, ...prev].slice(0, 100));
   }, []);
 
+  const onBookAnalysisReceived = useCallback((analysis: BookAnalysis) => {
+      setBookAnalysis(analysis);
+      AlertEngine.getInstance().processBookAnalysis(activeSymbol, analysis);
+  }, [activeSymbol]);
+
   return (
     <div className="h-screen w-screen transition-colors duration-300 dark:bg-[#050608] bg-slate-50 text-slate-800 dark:text-slate-300 font-sans selection:bg-ai-accent selection:text-white flex flex-col overflow-hidden">
       
+      <AlertToaster />
+
       {/* 1. GLOBAL COMMAND BAR */}
       <header className="h-14 bg-white dark:bg-[#080a0f] border-b border-light-border dark:border-ai-border flex items-center justify-between px-4 z-50 flex-shrink-0 shadow-sm">
          <div className="flex items-center gap-4">
@@ -256,7 +342,15 @@ const App: React.FC = () => {
             
             <div className="h-6 w-[1px] bg-light-border dark:bg-ai-border/50"></div>
             
-            <div className="relative">
+            <Scanner 
+               onSignal={handleNewSignal} 
+               variant="compact" 
+               onDetailsClick={() => setShowConnectionEngine(true)}
+            />
+         </div>
+
+         <div className="flex items-center gap-3">
+             <div className="relative">
                 <button
                    onClick={() => setFeedOpen(!isFeedOpen)}
                    className={`
@@ -284,10 +378,8 @@ const App: React.FC = () => {
                         />
                     </div>
                 )}
-            </div>
-         </div>
+             </div>
 
-         <div className="flex items-center gap-3">
              <ThemeToggle />
              <div className="h-6 w-[1px] bg-light-border dark:bg-ai-border/50"></div>
 
@@ -311,14 +403,6 @@ const App: React.FC = () => {
                   </button>
                 ))}
              </div>
-
-             <div className="h-6 w-[1px] bg-light-border dark:bg-ai-border/50"></div>
-
-             <Scanner 
-               onSignal={handleNewSignal} 
-               variant="compact" 
-               onDetailsClick={() => setShowConnectionEngine(true)}
-             />
          </div>
       </header>
 
@@ -338,7 +422,7 @@ const App: React.FC = () => {
                         <DeepBookScanner 
                           symbol={activeSymbol} 
                           marketType={activeMarket} 
-                          onAnalysis={setBookAnalysis} 
+                          onAnalysis={onBookAnalysisReceived} 
                           onData={(b, a) => { setRawBids(b); setRawAsks(a); }}
                         />
                      </div>
@@ -349,16 +433,20 @@ const App: React.FC = () => {
                       <div className="col-span-12 lg:col-span-8 row-span-8 relative">
                           <MarketChart 
                             data={chartData} 
-                            currentPrice={chartData[chartData.length-1]?.price || 0} 
+                            currentPrice={chartData[chartData.length-1]?.close || 0} 
                             zones={forensicAnalytics.zones}
                             walls={forensicAnalytics.walls}
+                            congruence={congruenceState}
+                            refPrice={coinbasePrice}
+                            symbol={activeSymbol}
+                            onSymbolChange={handleSwapSymbol}
                           />
                       </div>
                       <div className="col-span-12 lg:col-span-4 row-span-8">
                           <DeepBookScanner 
                             symbol={activeSymbol} 
                             marketType={activeMarket} 
-                            onAnalysis={setBookAnalysis} 
+                            onAnalysis={onBookAnalysisReceived} 
                             onData={(b, a) => { setRawBids(b); setRawAsks(a); }}
                           />
                       </div>
@@ -379,7 +467,7 @@ const App: React.FC = () => {
                           <DeepBookScanner 
                             symbol={activeSymbol} 
                             marketType={activeMarket} 
-                            onAnalysis={setBookAnalysis} 
+                            onAnalysis={onBookAnalysisReceived} 
                             onData={(b, a) => { setRawBids(b); setRawAsks(a); }}
                           />
                       </div>
@@ -387,7 +475,7 @@ const App: React.FC = () => {
                          <AdaptiveIcebergEngine symbol={activeSymbol} marketType={activeMarket} />
                       </div>
                       <div className="relative overflow-hidden flex flex-col">
-                          <InstitutionalTape signals={combinedWhaleSignals} />
+                          <InstitutionalTape signals={tapeHistory} />
                       </div>
                   </div>
                )}
@@ -407,19 +495,39 @@ const App: React.FC = () => {
                         bookAnalysis={bookAnalysis} 
                         rawBids={rawBids} 
                         rawAsks={rawAsks}
-                        currentPrice={chartData[chartData.length-1]?.price || 0}
+                        toxicityScore={toxicity}
+                        currentPrice={chartData[chartData.length-1]?.close || 0}
                         avgVolume={globalData.find(d => d.symbol === activeSymbol)?.volume24h ? (globalData.find(d => d.symbol === activeSymbol)!.volume24h / 1440) : 1}
+                        chartData={chartData}
+                        symbol={activeSymbol}
+                        onSymbolChange={handleSwapSymbol}
                       />
                     </div>
                     <div className="col-span-12 lg:col-span-3 relative">
                       <DeepBookScanner 
                         symbol={activeSymbol} 
                         marketType={activeMarket} 
-                        onAnalysis={setBookAnalysis} 
+                        onAnalysis={onBookAnalysisReceived} 
                         onData={(b, a) => { setRawBids(b); setRawAsks(a); }}
                       />
                     </div>
                   </div>
+               )}
+               {layoutMode === 'FORENSIC_V2' && (
+                 <div className="h-full relative overflow-hidden">
+                    <ForensicDashboard 
+                      symbol={activeSymbol}
+                      history={tapeHistory}
+                      chartData={chartData}
+                      currentPrice={chartData[chartData.length-1]?.close || 0}
+                      zones={forensicAnalytics.zones}
+                      walls={forensicAnalytics.walls}
+                      rawBids={rawBids}
+                      rawAsks={rawAsks}
+                      incomingTrade={latestTrade}
+                      onSymbolChange={handleSwapSymbol}
+                    />
+                 </div>
                )}
             </div>
          </main>

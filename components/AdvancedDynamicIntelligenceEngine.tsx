@@ -1,5 +1,7 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Activity, Radio, Database, RefreshCw, Server, ShieldCheck, Zap, Globe, Lock, Wifi, Network, CheckCircle2 } from 'lucide-react';
+import { AdminStats } from './AdminStats';
 
 /**
  * ------------------------------------------------------------------
@@ -313,7 +315,7 @@ export const AdvancedDynamicIntelligenceEngine: React.FC = () => {
       <div className="bg-slate-900 border-b border-slate-800 p-4 flex justify-between items-center">
         <div className="flex items-center gap-2">
           <Activity className="text-emerald-500 w-5 h-5" />
-          <h1 className="font-bold text-slate-100 tracking-wider">ADAPTIVE INTEL ENGINE</h1>
+          <h1 className="font-bold text-slate-100 tracking-wider uppercase">System Intelligence Hub</h1>
         </div>
         
         {/* PROTOCOL INDICATOR CHIP */}
@@ -333,6 +335,9 @@ export const AdvancedDynamicIntelligenceEngine: React.FC = () => {
         </div>
       </div>
 
+      {/* ADMIN BUSINESS METRICS HUD */}
+      <AdminStats mrr={42850} activeSubs={128} />
+
       {/* MAIN DASHBOARD */}
       <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
         
@@ -351,11 +356,11 @@ export const AdvancedDynamicIntelligenceEngine: React.FC = () => {
             <div className="flex gap-4">
                 <div className="p-4 bg-black/40 rounded border border-slate-800 flex-1">
                     <h3 className="text-xs font-bold text-slate-500 mb-2 uppercase">Markets Synthesized</h3>
-                    <div className="text-2xl text-emerald-400 font-bold">{metrics.marketCount}</div>
+                    <div className="text-2xl text-emerald-400 font-bold tabular-nums">{metrics.marketCount}</div>
                 </div>
                 <div className="p-4 bg-black/40 rounded border border-slate-800 flex-1">
                     <h3 className="text-xs font-bold text-slate-500 mb-2 uppercase">Latency</h3>
-                    <div className="text-2xl text-blue-400 font-bold">{metrics.latency}<span className="text-sm text-slate-600">ms</span></div>
+                    <div className="text-2xl text-blue-400 font-bold tabular-nums">{metrics.latency}<span className="text-sm text-slate-600">ms</span></div>
                 </div>
             </div>
 

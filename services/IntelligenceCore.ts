@@ -1,68 +1,102 @@
 
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { ForensicData, IntelligenceReport, GlobalStrategicState } from "../types";
 
 export class IntelligenceCore {
-  private ai: GoogleGenAI;
-
-  constructor() {
-    const apiKey = process.env.API_KEY;
-    if (!apiKey) throw new Error("CRITICAL: API_KEY is missing from environment.");
-    this.ai = new GoogleGenAI({ apiKey });
-  }
-
+  /**
+   * Performs a high-fidelity clinical audit using Gemini 3 Pro.
+   * Optimized for zero-latency inference and strict structural JSON.
+   */
   public async generateStrategicBriefing(
     symbol: string,
     history: ForensicData[],
     marketData: GlobalStrategicState[]
   ): Promise<IntelligenceReport> {
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    
+    // Extract recent tape signatures for the model
+    const tapeSample = history.slice(0, 15).map(h => ({
+      type: h.type,
+      price: h.price,
+      size: h.size,
+      conf: h.confidence,
+      layer: h.detectionLayer
+    }));
+
     const prompt = `
-      Perform a clinical forensic market structural audit.
-      TARGET_ASSET: ${symbol}
-      TAPE_FORENSICS: ${JSON.stringify(history.slice(0, 10))}
-      GLOBAL_MATRIX: ${JSON.stringify(marketData.slice(0, 5))}
+      [SYSTEM_ROLE]: YOU ARE THE MASTER STRUCTURAL AUDITOR FOR AN ELITE HFT FIRM.
+      [TASK]: PERFORM A CLINICAL FORENSIC AUDIT OF THE ASSET: ${symbol}.
       
-      STRICT CONSTRAINTS:
-      - USE COLD, CLINICAL TECHNICAL LANGUAGE.
-      - DO NOT PROVIDE INVESTMENT ADVICE.
-      - IDENTIFY SPECIFIC STRUCTURAL ANOMALIES (LIQUIDITY VOIDS, DELTA DIVERGENCE, ROTATION BETA SKEW).
-      - AUDIT FOR MANIPULATION SIGNATURES IN RECENT DATA.
-      - OUTPUT STRICT JSON ONLY. NO MARKDOWN.
+      [DATA_PLANE_INGESTION]:
+      - TAPE_SIGNATURES: ${JSON.stringify(tapeSample)}
+      - GLOBAL_LIQUIDITY_MATRIX: ${JSON.stringify(marketData.slice(0, 8))}
       
-      JSON_SCHEMA:
-      {
-        "structuralAnalysis": "Forensic technical audit summary",
-        "anomalies": ["Detection 1", "Detection 2"],
-        "bias": "BULLISH" | "BEARISH" | "NEUTRAL",
-        "liquidityDelta": number (Net % liquidity shift detected)
-      }
+      [STRICT_CLINICAL_REQUIREMENTS]:
+      1. IDENTIFY SPECIFIC INSTITUTIONAL SIGNATURES (e.g., Passive Absorption, Displacement Traps).
+      2. ANALYZE DELTA DIVERGENCE BETWEEN TAPE INTENSITY AND GLOBAL ROTATION.
+      3. ASSESS SYSTEMIC RISK BASED ON LIQUIDITY VOIDS.
+      4. DO NOT PROVIDE INVESTMENT ADVICE. USE PURELY TECHNICAL TERMINOLOGY.
+      
+      [RESPONSE_REQUIREMENTS]:
+      - OUTPUT ONLY JSON. 
+      - DO NOT INCLUDE MARKDOWN CODE FENCES.
     `;
 
     try {
-      const response = await this.ai.models.generateContent({
+      const response = await ai.models.generateContent({
         model: 'gemini-3-pro-preview',
         contents: prompt,
         config: { 
           responseMimeType: "application/json",
-          thinkingConfig: { thinkingBudget: 0 } 
+          // Define strict schema using Gemini Type system
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              structuralAnalysis: {
+                type: Type.STRING,
+                description: "The primary technical summary of market structure."
+              },
+              anomalies: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+                description: "List of identified technical anomalies."
+              },
+              bias: {
+                type: Type.STRING,
+                description: "BULLISH, BEARISH, or NEUTRAL."
+              },
+              liquidityDelta: {
+                type: Type.NUMBER,
+                description: "Net percentage shift in liquidity."
+              }
+            },
+            required: ["structuralAnalysis", "anomalies", "bias", "liquidityDelta"]
+          }
         }
       });
 
-      const data = JSON.parse(response.text || '{}');
+      // Gemini Response Handling: Use .text property directly.
+      // We also clean the string in case the model outputs markdown fences despite instructions.
+      let jsonStr = response.text || '{}';
+      jsonStr = jsonStr.replace(/```json|```/g, "").trim();
+      
+      const data = JSON.parse(jsonStr);
+      
       return {
         id: `AUDIT-${Date.now()}-${Math.random().toString(36).substr(2, 5).toUpperCase()}`,
         timestamp: Date.now(),
-        structuralAnalysis: data.structuralAnalysis || "Analysis inconclusive due to data packet fragmentation.",
-        anomalies: Array.isArray(data.anomalies) ? data.anomalies : ["System Syncing..."],
-        bias: data.bias || "NEUTRAL",
+        structuralAnalysis: data.structuralAnalysis || "Analysis incomplete: Data packet corruption.",
+        anomalies: Array.isArray(data.anomalies) ? data.anomalies : ["Inconclusive node scan."],
+        bias: (data.bias || "NEUTRAL").toUpperCase() as any,
         liquidityDelta: typeof data.liquidityDelta === 'number' ? data.liquidityDelta : 0
       };
     } catch (e) {
+      console.error("[INTELLIGENCE_CORE_CRITICAL_FAILURE]", e);
       return {
-        id: 'FAIL',
+        id: 'CORE_FAIL_FALLBACK',
         timestamp: Date.now(),
-        structuralAnalysis: "System Desync: Forensic logic packet collision.",
-        anomalies: ["Transport layer integrity compromised."],
+        structuralAnalysis: "CRITICAL: The logic engine failed to synthesize a report. This usually indicates an API rate limit or context window collision. Reverting to local heuristic mode.",
+        anomalies: ["Transport layer latency violation", "Neural node desync"],
         bias: "NEUTRAL",
         liquidityDelta: 0
       };

@@ -3,7 +3,11 @@ import React, { useEffect, useState, useRef } from 'react';
 import { OrderBookBrain, OrderBookLevel, BookAnalysis } from '../services/OrderBookBrain';
 import { MarketType } from '../types';
 import { getStreamUrl } from '../services/MarketRegistry';
-import { Layers, AlertTriangle, ShieldAlert, Crosshair, Zap, Activity, Eye, Lock, BarChart2, Info } from 'lucide-react';
+import { 
+  Layers, AlertTriangle, ShieldAlert, Crosshair, Zap, 
+  Activity, Eye, Lock, BarChart2, Info, ArrowRight, 
+  Magnet, ShieldCheck, RefreshCw, BoxSelect
+} from 'lucide-react';
 
 interface Props {
   symbol: string;
@@ -17,7 +21,8 @@ const DeepBookScanner: React.FC<Props> = ({ symbol, marketType, onAnalysis, onDa
   const [asks, setAsks] = useState<OrderBookLevel[]>([]);
   const [analysis, setAnalysis] = useState<BookAnalysis | null>(null);
   const [lastPrice, setLastPrice] = useState(0);
-  const [hoveredLevel, setHoveredLevel] = useState<{price: number, qty: number} | null>(null);
+  const [hoveredLevel, setHoveredLevel] = useState<{price: number, qty: number, total: number} | null>(null);
+  const [isHighlightingDominant, setIsHighlightingDominant] = useState(false);
   
   const brain = useRef(new OrderBookBrain());
   const ws = useRef<WebSocket | null>(null);
@@ -35,7 +40,7 @@ const DeepBookScanner: React.FC<Props> = ({ symbol, marketType, onAnalysis, onDa
     ws.current.onmessage = (event) => {
       try {
         const payload = JSON.parse(event.data);
-        const data = payload.data;
+        const data = payload.data || payload;
         if (!data) return;
 
         const rawBids = data.bids || data.b;
@@ -66,197 +71,304 @@ const DeepBookScanner: React.FC<Props> = ({ symbol, marketType, onAnalysis, onDa
       return (
         <div className="bg-ai-panel border border-ai-border rounded-xl p-8 flex flex-col items-center justify-center h-full min-h-[400px] text-gray-500 font-mono animate-pulse">
             <Layers size={48} className="mb-4 text-ai-accent opacity-50" />
-            <div className="text-sm font-bold">SCANNING {symbol.toUpperCase()} BOOK...</div>
-            <div className="text-xs text-ai-accent mt-2 font-mono uppercase tracking-widest">{marketType} PROTOCOLS ACTIVE</div>
+            <div className="text-sm font-bold tracking-widest uppercase">Scanning {symbol.toUpperCase()} Book...</div>
+            <div className="text-[10px] text-ai-accent mt-2 font-mono uppercase tracking-[0.3em]">{marketType} Protocols Active</div>
         </div>
       );
   }
 
-  const maxVol = Math.max(...bids.map(b => b.qty), ...asks.map(a => a.qty), 1);
+  const maxQty = Math.max(...bids.map(b => b.qty), ...asks.map(a => a.qty), 1);
+  const maxTotal = Math.max(...bids.map(b => b.total), ...asks.map(a => a.total), 1);
 
   return (
     <div className="bg-ai-dark border border-ai-border rounded-xl overflow-hidden shadow-2xl font-mono text-xs h-full flex flex-col relative">
       
+      {/* HUD HEADER */}
       <div className="bg-ai-panel/50 border-b border-ai-border p-4 flex items-center justify-between flex-shrink-0 z-10">
         <div>
-            <h2 className="text-sm font-bold text-cyan-400 flex items-center gap-2 tracking-wider">
-                <Eye size={16} /> ORDER BOOK DECRYPTION <span className="text-gray-600">// {symbol.toUpperCase()}</span>
+            <h2 className="text-sm font-black text-cyan-400 flex items-center gap-2 tracking-widest uppercase">
+                <Eye size={16} /> Order Book Decryption <span className="text-gray-600 font-bold tracking-normal ml-2">// {symbol.toUpperCase()}</span>
             </h2>
-            <div className="flex items-center gap-4 mt-1 text-[10px] text-gray-500">
+            <div className="flex items-center gap-4 mt-1 text-[10px] text-gray-500 font-bold uppercase tracking-tight">
                 <span className="flex items-center gap-1">
-                    INTEGRITY: 
-                    <span className={analysis.integrityScore > 80 ? 'text-buy font-bold' : 'text-sell font-bold'}>
+                    Integrity: 
+                    <span className={analysis.integrityScore > 80 ? 'text-emerald-500' : 'text-rose-500'}>
                         {analysis.integrityScore.toFixed(0)}%
                     </span>
                 </span>
                 {analysis.liquidityVoid && (
-                    <span className="text-sell font-bold flex items-center gap-1 animate-pulse">
-                        <AlertTriangle size={10} /> LIQUIDITY VOID
+                    <span className="text-rose-500 flex items-center gap-1 animate-pulse">
+                        <AlertTriangle size={10} /> Liquidity Void
                     </span>
                 )}
             </div>
         </div>
-        <div className="flex items-center gap-2">
-            <div className={`px-2 py-0.5 rounded border text-[10px] font-bold ${marketType === 'SPOT' ? 'bg-blue-900/20 text-blue-400 border-blue-900' : 'bg-purple-900/20 text-purple-400 border-purple-900'}`}>
+        <div className="flex items-center gap-3">
+            <div className={`px-2 py-0.5 rounded border text-[10px] font-black tracking-widest uppercase ${marketType === 'SPOT' ? 'bg-blue-900/20 text-blue-400 border-blue-900' : 'bg-purple-900/20 text-purple-400 border-purple-900'}`}>
                 {marketType}
             </div>
-            <div className="w-2 h-2 rounded-full bg-buy animate-pulse shadow-[0_0_8px_#10B981]"></div>
+            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_#10B981]"></div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-0 flex-1 overflow-hidden">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-0 flex-1 overflow-hidden min-h-0">
           
+        {/* L2 DATA PANES */}
         <div className="lg:col-span-3 p-0 border-r border-ai-border bg-black/10 flex flex-col h-full overflow-hidden">
             <div className="flex border-b border-ai-border/30 bg-ai-panel/30 flex-shrink-0">
-                <div className="flex-1 p-2 text-[9px] text-gray-500 font-bold uppercase tracking-widest flex items-center gap-2">
-                    <Zap size={10} /> Tape & Depth
+                <div className="flex-1 p-2 text-[9px] text-gray-500 font-black uppercase tracking-widest flex items-center gap-2">
+                    <Zap size={10} className="text-ai-accent" /> Active Tape Depth
                 </div>
-                <div className="w-40 border-l border-ai-border/30 p-2 text-[9px] text-gray-500 font-bold uppercase tracking-widest flex items-center gap-2">
-                    <BarChart2 size={10} /> Volume Profile
+                <div className="w-48 border-l border-ai-border/30 p-2 text-[9px] text-gray-500 font-black uppercase tracking-widest flex items-center gap-2">
+                    <BoxSelect size={10} className="text-ai-accent" /> Depth Profile
                 </div>
             </div>
 
-            <div className="flex-1 p-2 flex gap-1 overflow-y-auto custom-scrollbar">
-                 <div className="flex-1 flex flex-col">
+            <div className="flex-1 p-2 flex gap-1 overflow-y-auto custom-scrollbar min-h-0">
+                 {/* PRICE / QTY GRID */}
+                 <div className="flex-1 flex flex-col min-h-0">
                     <div className="flex flex-col-reverse gap-[1px]">
-                        {asks.map((ask, i) => (
-                            <div 
-                              key={`ask-${i}`} 
-                              className={`flex items-center p-1 px-2 h-6 transition-colors rounded ${ask.isWhale ? 'bg-sell/10' : 'hover:bg-white/5'}`}
-                            >
-                                <span className={`w-24 font-bold ${ask.isWhale ? 'text-white' : 'text-sell/80'}`}>{ask.price.toFixed(2)}</span>
-                                <div className="flex-1 flex justify-end gap-2">
-                                     {ask.isSpoof && <span className="text-[9px] text-yellow-500 font-bold flex items-center gap-1"><Zap size={8} /> SPOOF</span>}
-                                     {ask.isWhale && <span className="text-[9px] text-sell font-bold flex items-center gap-1 tracking-widest"><Lock size={8} /> WALL</span>}
+                        {asks.map((ask, i) => {
+                            const isDominant = analysis.dominantWall?.side === 'ASK' && analysis.dominantWall?.price === ask.price;
+                            return (
+                                <div 
+                                  key={`ask-${i}`} 
+                                  className={`flex items-center p-1 px-2 h-6 transition-all rounded relative group ${ask.isWhale ? 'bg-rose-500/5' : 'hover:bg-white/5'} ${isDominant && isHighlightingDominant ? 'bg-rose-500/20 ring-1 ring-rose-500/50' : ''}`}
+                                >
+                                    <span className={`w-24 font-black tracking-tighter ${isDominant ? 'text-rose-400' : ask.isWhale ? 'text-white' : 'text-rose-500/80'}`}>{ask.price.toFixed(2)}</span>
+                                    <div className="flex-1 flex justify-end gap-3 px-2">
+                                         {ask.isSpoof && <span className="text-[8px] text-amber-500 font-black flex items-center gap-1 animate-pulse"><Zap size={8} /> SPOOF</span>}
+                                         {ask.isWhale && (
+                                            <span className={`text-[8px] font-black flex items-center gap-1 tracking-[0.2em] ${isDominant ? 'text-white' : 'text-rose-500'}`}>
+                                              <Lock size={8} /> {isDominant ? 'PRIMARY_WALL' : 'WALL'}
+                                            </span>
+                                         )}
+                                    </div>
+                                    <div className="w-16 text-right text-[9px] text-gray-500 font-bold tabular-nums group-hover:text-gray-300 transition-colors">
+                                      {ask.qty.toFixed(2)}
+                                    </div>
                                 </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
 
-                    <div className="py-2 my-1 border-y border-dashed border-ai-border text-center text-gray-500 text-sm flex items-center justify-between px-4 bg-ai-panel/30 font-bold">
-                        <Activity size={10} className="text-ai-accent" />
-                        <span className="text-white tracking-widest">{lastPrice.toFixed(2)}</span>
-                        <span className="text-[9px] text-gray-600 font-mono">MARKET MID</span>
+                    <div className="py-2.5 my-1 border-y border-dashed border-ai-border text-center flex items-center justify-between px-4 bg-ai-panel/30 font-black relative overflow-hidden group/mid">
+                        <div className="absolute inset-0 bg-ai-accent/5 opacity-0 group-hover/mid:opacity-100 transition-opacity"></div>
+                        <Activity size={10} className="text-ai-accent animate-pulse relative z-10" />
+                        <span className="text-white tracking-[0.3em] text-base relative z-10 tabular-nums">{lastPrice.toFixed(2)}</span>
+                        <span className="text-[8px] text-gray-600 font-black uppercase tracking-widest relative z-10">Market Mid</span>
                     </div>
 
                     <div className="flex flex-col gap-[1px]">
-                         {bids.map((bid, i) => (
-                            <div 
-                              key={`bid-${i}`} 
-                              className={`flex items-center p-1 px-2 h-6 transition-colors rounded ${bid.isWhale ? 'bg-buy/10' : 'hover:bg-white/5'}`}
-                            >
-                                <span className={`w-24 font-bold ${bid.isWhale ? 'text-white' : 'text-buy/80'}`}>{bid.price.toFixed(2)}</span>
-                                <div className="flex-1 flex justify-end gap-2">
-                                     {bid.isSpoof && <span className="text-[9px] text-yellow-500 font-bold flex items-center gap-1"><Zap size={8} /> SPOOF</span>}
-                                     {bid.isWhale && <span className="text-[9px] text-buy font-bold flex items-center gap-1 tracking-widest"><ShieldAlert size={8} /> FLOOR</span>}
+                         {bids.map((bid, i) => {
+                            const isDominant = analysis.dominantWall?.side === 'BID' && analysis.dominantWall?.price === bid.price;
+                            return (
+                                <div 
+                                  key={`bid-${i}`} 
+                                  className={`flex items-center p-1 px-2 h-6 transition-all rounded relative group ${bid.isWhale ? 'bg-emerald-500/5' : 'hover:bg-white/5'} ${isDominant && isHighlightingDominant ? 'bg-emerald-500/20 ring-1 ring-emerald-500/50' : ''}`}
+                                >
+                                    <span className={`w-24 font-black tracking-tighter ${isDominant ? 'text-emerald-400' : bid.isWhale ? 'text-white' : 'text-emerald-500/80'}`}>{bid.price.toFixed(2)}</span>
+                                    <div className="flex-1 flex justify-end gap-3 px-2">
+                                         {bid.isSpoof && <span className="text-[8px] text-amber-500 font-black flex items-center gap-1 animate-pulse"><Zap size={8} /> SPOOF</span>}
+                                         {bid.isWhale && (
+                                            <span className={`text-[8px] font-black flex items-center gap-1 tracking-[0.2em] ${isDominant ? 'text-white' : 'text-emerald-500'}`}>
+                                              <ShieldAlert size={8} /> {isDominant ? 'PRIMARY_FLOOR' : 'FLOOR'}
+                                            </span>
+                                         )}
+                                    </div>
+                                    <div className="w-16 text-right text-[9px] text-gray-500 font-bold tabular-nums group-hover:text-gray-300 transition-colors">
+                                      {bid.qty.toFixed(2)}
+                                    </div>
                                 </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                  </div>
 
-                 <div className="w-40 flex flex-col border-l border-ai-border/30 bg-black/40 relative group/profile">
-                    <div className="flex flex-col-reverse gap-[1px]">
-                        {asks.map((ask, i) => (
-                             <div 
-                                key={`ask-vol-${i}`} 
-                                className="h-6 flex items-center relative cursor-help"
-                                onMouseEnter={() => setHoveredLevel({price: ask.price, qty: ask.qty})}
-                                onMouseLeave={() => setHoveredLevel(null)}
-                             >
-                                 <div className="absolute inset-y-0 right-0 bg-gradient-to-l from-rose-500/40 to-rose-500/10 rounded-l-sm transition-all duration-300" 
-                                      style={{ width: `${(ask.qty / maxVol) * 100}%` }}></div>
-                                 <span className="absolute right-1 text-[8px] text-rose-200/50 z-20 font-mono group-hover/profile:text-rose-200">{ask.qty.toFixed(2)}</span>
-                             </div>
-                        ))}
+                 {/* FORENSIC DEPTH PROFILE (VISUAL INTEGRATION) */}
+                 <div className="w-48 flex flex-col border-l border-ai-border/30 bg-black/40 relative group/profile overflow-hidden min-h-0">
+                    <div className="absolute inset-0 flex pointer-events-none opacity-[0.03]">
+                      <div className="flex-1 border-r border-white/50"></div>
+                      <div className="flex-1 border-r border-white/50"></div>
+                      <div className="flex-1 border-r border-white/50"></div>
                     </div>
 
-                    <div className="py-2 my-1 h-[34px] flex items-center">
-                        <div className="w-full h-[1px] bg-ai-border/40"></div>
+                    <div className="flex flex-col-reverse gap-[1px]">
+                        {asks.map((ask, i) => {
+                             const isDominant = analysis.dominantWall?.side === 'ASK' && analysis.dominantWall?.price === ask.price;
+                             return (
+                                <div 
+                                    key={`ask-vol-${i}`} 
+                                    className={`h-6 flex items-center relative cursor-crosshair group/item ${isDominant && isHighlightingDominant ? 'z-30' : ''}`}
+                                    onMouseEnter={() => setHoveredLevel({price: ask.price, qty: ask.qty, total: ask.total})}
+                                    onMouseLeave={() => setHoveredLevel(null)}
+                                >
+                                    {/* Cumulative Depth Layer */}
+                                    <div className="absolute inset-y-0 right-0 bg-rose-500/5 transition-all duration-700" 
+                                         style={{ width: `${(ask.total / maxTotal) * 100}%` }}></div>
+                                    
+                                    {/* Individual Level Pressure Layer */}
+                                    <div className={`absolute inset-y-0.5 right-0 bg-gradient-to-l transition-all duration-300 border-r ${
+                                        isDominant ? 'from-rose-400 to-rose-600 border-white shadow-[0_0_10px_#EF4444]' : 'from-rose-500/60 to-rose-500/10 border-rose-500'
+                                    }`} 
+                                    style={{ width: `${(ask.qty / maxQty) * 100}%` }}></div>
+                                    
+                                    {isDominant && (
+                                        <div className="absolute left-0 w-full h-[1px] bg-white/20 animate-pulse pointer-events-none" />
+                                    )}
+
+                                    <span className={`absolute right-1 text-[8px] z-20 font-black tabular-nums transition-colors ${isDominant ? 'text-white' : 'text-rose-200/30 group-hover/item:text-rose-200'}`}>
+                                      {ask.qty.toFixed(1)}
+                                    </span>
+                                </div>
+                             );
+                        })}
+                    </div>
+
+                    <div className="py-2.5 my-1 h-[34px] flex items-center relative z-20">
+                        <div className="w-full h-[1px] bg-ai-border shadow-[0_0_8px_rgba(59,130,246,0.5)]"></div>
                     </div>
 
                     <div className="flex flex-col gap-[1px]">
-                        {bids.map((bid, i) => (
-                             <div 
-                                key={`bid-vol-${i}`} 
-                                className="h-6 flex items-center relative cursor-help"
-                                onMouseEnter={() => setHoveredLevel({price: bid.price, qty: bid.qty})}
-                                onMouseLeave={() => setHoveredLevel(null)}
-                             >
-                                 <div className="absolute inset-y-0 right-0 bg-gradient-to-l from-emerald-500/40 to-emerald-500/10 rounded-l-sm transition-all duration-300" 
-                                      style={{ width: `${(bid.qty / maxVol) * 100}%` }}></div>
-                                 <span className="absolute right-1 text-[8px] text-emerald-200/50 z-20 font-mono group-hover/profile:text-emerald-200">{bid.qty.toFixed(2)}</span>
-                             </div>
-                        ))}
+                        {bids.map((bid, i) => {
+                             const isDominant = analysis.dominantWall?.side === 'BID' && analysis.dominantWall?.price === bid.price;
+                             return (
+                                <div 
+                                    key={`bid-vol-${i}`} 
+                                    className={`h-6 flex items-center relative cursor-crosshair group/item ${isDominant && isHighlightingDominant ? 'z-30' : ''}`}
+                                    onMouseEnter={() => setHoveredLevel({price: bid.price, qty: bid.qty, total: bid.total})}
+                                    onMouseLeave={() => setHoveredLevel(null)}
+                                >
+                                    {/* Cumulative Depth Layer */}
+                                    <div className="absolute inset-y-0 right-0 bg-emerald-500/5 transition-all duration-700" 
+                                         style={{ width: `${(bid.total / maxTotal) * 100}%` }}></div>
+                                    
+                                    {/* Individual Level Pressure Layer */}
+                                    <div className={`absolute inset-y-0.5 right-0 bg-gradient-to-l transition-all duration-300 border-r ${
+                                        isDominant ? 'from-emerald-400 to-emerald-600 border-white shadow-[0_0_10px_#10B981]' : 'from-emerald-500/60 to-emerald-500/10 border-emerald-500'
+                                    }`} 
+                                    style={{ width: `${(bid.qty / maxQty) * 100}%` }}></div>
+
+                                    {isDominant && (
+                                        <div className="absolute left-0 w-full h-[1px] bg-white/20 animate-pulse pointer-events-none" />
+                                    )}
+                                    
+                                    <span className={`absolute right-1 text-[8px] z-20 font-black tabular-nums transition-colors ${isDominant ? 'text-white' : 'text-emerald-200/30 group-hover/item:text-emerald-200'}`}>
+                                      {bid.qty.toFixed(1)}
+                                    </span>
+                                </div>
+                             );
+                        })}
                     </div>
 
+                    {/* INTERACTIVE LEVEL INTELLIGENCE */}
                     {hoveredLevel && (
-                      <div className="absolute -left-28 top-1/2 -translate-y-1/2 bg-ai-panel border border-ai-accent p-2 rounded shadow-2xl z-[100] animate-in fade-in zoom-in-95 pointer-events-none">
-                        <div className="text-[9px] text-gray-500 font-bold uppercase mb-1">AGGREGATED VOLUME</div>
-                        <div className="text-xs text-white font-mono">{hoveredLevel.qty.toFixed(4)} <span className="text-gray-500">BTC</span></div>
-                        <div className="text-[9px] text-ai-accent mt-1">@ ${hoveredLevel.price.toFixed(2)}</div>
+                      <div className="absolute -left-48 top-1/2 -translate-y-1/2 bg-[#080a0f]/95 border border-ai-accent p-3 rounded shadow-[0_0_30px_rgba(59,130,246,0.3)] z-[100] animate-in fade-in zoom-in-95 pointer-events-none backdrop-blur-md min-w-[180px]">
+                        <div className="text-[8px] text-gray-500 font-black uppercase tracking-widest mb-2 border-b border-white/5 pb-1">Level Analysis</div>
+                        <div className="space-y-2">
+                           <div className="flex justify-between items-center">
+                              <span className="text-[8px] text-gray-600 font-black uppercase">Price</span>
+                              <span className="text-white font-black tracking-tighter tabular-nums">${hoveredLevel.price.toFixed(2)}</span>
+                           </div>
+                           <div className="flex justify-between items-center">
+                              <span className="text-[8px] text-gray-600 font-black uppercase">Depth_Qty</span>
+                              <span className="text-ai-accent font-black tracking-tighter tabular-nums">{hoveredLevel.qty.toFixed(4)} BTC</span>
+                           </div>
+                           <div className="flex justify-between items-center">
+                              <span className="text-[8px] text-gray-600 font-black uppercase">Cumulative</span>
+                              <span className="text-emerald-400 font-black tracking-tighter tabular-nums">{hoveredLevel.total.toFixed(2)} BTC</span>
+                           </div>
+                        </div>
                       </div>
                     )}
                  </div>
             </div>
         </div>
 
-        <div className="lg:col-span-1 bg-ai-panel/10 p-5 flex flex-col gap-6 overflow-y-auto">
+        {/* ANALYSIS SIDEBAR */}
+        <div className="lg:col-span-1 bg-ai-panel/10 p-5 flex flex-col gap-6 overflow-y-auto custom-scrollbar">
             <div>
-                <h3 className="text-[10px] font-bold text-gray-500 uppercase mb-3 flex items-center gap-2">
-                    <Activity size={12} className="text-ai-accent" /> Book Pressure Dynamics
+                <h3 className="text-[10px] font-black text-gray-500 uppercase mb-3 flex items-center gap-2 tracking-widest">
+                    <Activity size={12} className="text-ai-accent" /> Pressure Dynamics
                 </h3>
-                <div className="flex justify-between text-[10px] text-gray-400 mb-1 font-mono">
-                    <span className="text-emerald-400 font-bold">BIDS {analysis.bidPressure.toFixed(0)}%</span>
-                    <span className="text-rose-400 font-bold">ASKS {analysis.askPressure.toFixed(0)}%</span>
+                <div className="flex justify-between text-[9px] text-gray-400 mb-1.5 font-black uppercase tracking-tighter">
+                    <span className="text-emerald-500">Bids {analysis.bidPressure.toFixed(0)}%</span>
+                    <span className="text-rose-500">Asks {analysis.askPressure.toFixed(0)}%</span>
                 </div>
-                <div className="h-2 bg-black rounded-full overflow-hidden flex border border-ai-border">
-                    <div className="bg-gradient-to-r from-emerald-600 to-emerald-400 h-full transition-all duration-500 ease-out" style={{ width: `${analysis.bidPressure}%` }}></div>
-                    <div className="bg-gradient-to-l from-rose-600 to-rose-400 h-full transition-all duration-500 ease-out" style={{ width: `${analysis.askPressure}%` }}></div>
+                <div className="h-2 bg-black rounded-full overflow-hidden flex border border-white/5 shadow-inner">
+                    <div className="bg-emerald-500 h-full transition-all duration-700 ease-out shadow-[0_0_8px_#10B981]" style={{ width: `${analysis.bidPressure}%` }}></div>
+                    <div className="bg-rose-500 h-full transition-all duration-700 ease-out shadow-[0_0_8px_#EF4444]" style={{ width: `${analysis.askPressure}%` }}></div>
                 </div>
             </div>
 
-            <div className="bg-black/40 border border-ai-border rounded p-4 shadow-inner">
-                <div className="mb-4">
-                     <div className="text-[9px] text-gray-500 uppercase font-mono mb-1 tracking-widest">Protocol Integrity</div>
-                     <div className={`text-xs font-bold flex items-center gap-2 ${analysis.manipulationType !== 'NONE' ? 'text-yellow-500 animate-pulse' : 'text-emerald-500'}`}>
+            {/* DOMINANT LIQUIDITY CARD WITH MAGNETIC LINK */}
+            <div 
+              onMouseEnter={() => setIsHighlightingDominant(true)}
+              onMouseLeave={() => setIsHighlightingDominant(false)}
+              className={`bg-black/60 border rounded-lg p-4 shadow-2xl relative overflow-hidden transition-all duration-300 group/dominant ${isHighlightingDominant ? 'border-ai-accent shadow-[0_0_20px_rgba(59,130,246,0.15)]' : 'border-ai-border'}`}
+            >
+                <div className="absolute inset-0 bg-ai-accent/5 opacity-0 group-hover/dominant:opacity-100 transition-opacity pointer-events-none" />
+                <div className="mb-4 relative z-10">
+                     <div className="text-[9px] text-gray-600 uppercase font-black mb-1.5 tracking-[0.2em] flex items-center gap-2">
+                       <ShieldCheck size={10} className="text-emerald-500" /> Integrity_Auth
+                     </div>
+                     <div className={`text-[11px] font-black flex items-center gap-2 tracking-wider ${analysis.manipulationType !== 'NONE' ? 'text-amber-500 animate-pulse' : 'text-emerald-500'}`}>
                          {analysis.manipulationType !== 'NONE' ? <AlertTriangle size={14} /> : <ShieldAlert size={14} />}
-                         {analysis.manipulationType === 'NONE' ? 'ORDER FLOW CLEAN' : analysis.manipulationType.replace('_', ' ')}
+                         {analysis.manipulationType === 'NONE' ? 'FLOW_SECURE' : analysis.manipulationType.replace(/_/g, ' ')}
                      </div>
                 </div>
                 
-                <div>
-                     <div className="text-[9px] text-gray-500 uppercase font-mono mb-1 tracking-widest">Dominant Liquidity</div>
+                <div className="relative z-10 pt-3 border-t border-white/5">
+                     <div className="text-[9px] text-gray-600 uppercase font-black mb-2 tracking-[0.2em] flex items-center gap-2">
+                       <Magnet size={10} className={`transition-colors ${isHighlightingDominant ? 'text-ai-accent animate-ping' : 'text-gray-500'}`} /> Dominant Liquidity
+                     </div>
                      {analysis.dominantWall ? (
-                         <div className="animate-in slide-in-from-left-2 duration-300">
-                             <div className="text-lg font-black text-white tracking-tighter">${analysis.dominantWall.price.toFixed(2)}</div>
-                             <div className={`text-[10px] font-bold ${analysis.dominantWall.side === 'BID' ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                 {analysis.dominantWall.side} MAGNET ({analysis.dominantWall.strength.toFixed(2)} BTC)
+                         <div className="animate-in slide-in-from-left-2 duration-500">
+                             <div className="text-xl font-black text-white tracking-tighter tabular-nums flex items-center gap-2">
+                                <span className="text-gray-700 text-xs">$</span>{analysis.dominantWall.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                <ArrowRight size={12} className="text-ai-accent" />
+                             </div>
+                             <div className={`text-[10px] font-black uppercase tracking-widest mt-1 ${analysis.dominantWall.side === 'BID' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                 {analysis.dominantWall.side} CORE_MAGNET <span className="text-white ml-1">({analysis.dominantWall.strength.toFixed(2)} BTC)</span>
+                             </div>
+                             <div className="mt-2 text-[8px] text-gray-600 italic font-bold">
+                                Hover to localize on depth chart.
                              </div>
                          </div>
                      ) : (
-                         <div className="text-xs text-gray-600 italic font-mono uppercase tracking-widest">Scanning Walls...</div>
+                         <div className="text-[10px] text-gray-700 italic font-black uppercase tracking-[0.3em] flex items-center gap-2">
+                            <RefreshCw size={10} className="animate-spin" /> Scanning_Grid...
+                         </div>
                      )}
                 </div>
             </div>
 
-            <div className="bg-ai-accent/5 border border-ai-accent/20 rounded p-3 relative group">
-                <div className="absolute inset-0 bg-ai-accent opacity-[0.02] group-hover:opacity-10 transition-opacity"></div>
-                <div className="text-[9px] font-bold text-ai-accent uppercase mb-2 flex items-center gap-1">
-                    <Crosshair size={10} /> Market Intelligence
+            {/* NEURAL LOG */}
+            <div className="bg-ai-accent/5 border border-ai-accent/20 rounded-lg p-4 relative group shadow-inner">
+                <div className="absolute inset-0 bg-ai-accent opacity-[0.02] group-hover:opacity-[0.08] transition-opacity"></div>
+                <div className="text-[10px] font-black text-ai-accent uppercase mb-3 flex items-center gap-2 tracking-[0.2em]">
+                    <Crosshair size={12} className="animate-pulse" /> Neural_Intel_Log
                 </div>
-                <p className="text-[11px] leading-relaxed text-gray-300 font-mono">
+                <p className="text-[11px] leading-relaxed text-gray-300 font-mono tracking-tight">
                     {analysis.liquidityVoid 
-                        ? "ALERT: Liquidity vacuum detected near spread. High volatility expected." 
+                        ? "CRITICAL: Liquidity vacuum identified. Execution paths are destabilized." 
                         : analysis.bidPressure > 65 
-                        ? "Aggressive institutional bids detected. Buyers absorbing all passive sell orders." 
+                        ? "Institutional accumulation phase in progress. High probability of resistance absorption." 
                         : analysis.askPressure > 65 
-                            ? "Heavy resistance forming. Passive sellers outnumbering active takers." 
-                            : "Balanced book. Neutral flow confirmed. Waiting for whale trigger."
+                            ? "Resistance cluster solidified. Buy-side aggression insufficient to displace dominant asks." 
+                            : "Structural equilibrium detected. Mid-market delta remains neutral."
                     }
                 </p>
             </div>
         </div>
+      </div>
+
+      <div className="h-8 bg-[#080a0f] border-t border-ai-border flex justify-between items-center px-4 shrink-0 text-[8px] font-black uppercase text-gray-700 tracking-[0.4em] z-20">
+         <div className="flex items-center gap-6">
+            <span className="flex items-center gap-2"><Lock size={10} className="text-emerald-500/50" /> Secure_Stream</span>
+            <span className="flex items-center gap-2"><BarChart2 size={10} /> LATENCY: 100ms</span>
+         </div>
+         <span className="text-ai-accent/60">Forensic_L3_Authenticated</span>
       </div>
     </div>
   );
